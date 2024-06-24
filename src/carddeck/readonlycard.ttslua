@@ -67,6 +67,6 @@ function setInputReadonly()
 end
 
 function updateSave()
-    saved_data = JSON.encode({ valueData })
+    saved_data = JSON.encode({ cardRegistry })
     self.script_state = saved_data
 end
