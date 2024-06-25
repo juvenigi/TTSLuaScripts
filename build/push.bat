@@ -10,10 +10,10 @@ if not exist "%destDir%" (
     mkdir "%destDir%"
 )
 
-REM Iterate over each .ttslua file in the source directory
+REM Iterate over each .tts.lua file in the source directory
 for %%f in ("%srcDir%\*.tts.lua") do (
     REM Get the file name without extension
-    set fileName=%%~nf
+    set "fileName=%%~nf"
 
     REM Copy and rename the file to the destination directory with the new extension
     copy "%%f" "%destDir%\!fileName!.ttslua"
