@@ -1,36 +1,6 @@
 -- Deck playmat
 -- contains zones for main deck, graveyard, burned cards, and initialization zones for binding/unbinding cards
--- attached snap points (positions)
---"AttachedSnapPoints": [
---        {
---          "Position": {
---            "x": 2.0,
---            "y": 0.100000188,
---            "z": 0.0
---          }
---        },
---        {
---          "Position": {
---            "x": 0.6440823,
---            "y": 0.100000188,
---            "z": 0.0
---          }
---        },
---        {
---          "Position": {
---            "x": -0.6440823,
---            "y": 0.100000188,
---            "z": 0.0447075181
---          }
---        },
---        {
---          "Position": {
---            "x": -2.0,
---            "y": 0.100000188,
---            "z": 0.0
---          }
---        }
-
+-- attached snap points (positions): Vec{x, 0.1, 0} where x in {-2,-0,6,0,6,2} (*2 obj scale)
 function onLoad(saved_data)
     ---@type table<string,string>
 
@@ -130,7 +100,7 @@ function initButton(params)
     self.createButton(buttonParams)
 end
 
-function scanZones()
+function scanZones(deckIds)
     local selfVecAbs = self.getPosition()
     -- absolute position of deck areas to scan
     local areas = {
@@ -152,10 +122,14 @@ function scanZones()
             local obj = hit.hit_object
             if obj then
                 if obj.type == "Deck" then
-                    local finalDeck = --[[---@type tts__Deck]] obj
-                    local contents = finalDeck.getObjects()
-                    for _, card in ipairs(contents) do
-                        table.insert(result[area], card.guid)
+                    if deckIds then
+                        table.insert(result[area], obj.getGUID())
+                    else
+                        local finalDeck = --[[---@type tts__Deck]] obj
+                        local contents = finalDeck.getObjects()
+                        for _, card in ipairs(contents) do
+                            table.insert(result[area], card.guid)
+                        end
                     end
                 elseif obj.type == "Card" then
                     table.insert(result[area], obj.getGUID())
@@ -184,27 +158,33 @@ function findHitsInArea(pos, size)
 
     return hitList
 end
+--- Moves Cards or Decks to one of the predetermined locations
+--- TODO: rotate / flip cards before making them land into the deckzone
 ---@param location "draw" | "discard" | "burn" | "set"
 ---@param guids table<string,string>
-function moveGuidsToLocation(location, guids)
+---@param teleport boolean set position instantaneously?
+function moveGuidsToLocation(location, guids, teleport)
     local coords = self.getPosition()
     local scaleX = self.getScale().x
     if location == "draw" then
         coords = Vector.add(coords, Vector.new(-2 * scaleX, 0.1, 0))
-        --coords = Vector.add(coords, Vector.new(4.0, 0.100000188, 0.0))
     elseif location == "discard" then
-        coords = Vector.add(coords, Vector.new(0.6440823 * scaleX, 0.100000188, 0.0))
-    elseif location == "burn" then
         coords = Vector.add(coords, Vector.new(-0.6440823 * scaleX, 0.100000188, 0.0))
+    elseif location == "burn" then
+        coords = Vector.add(coords, Vector.new(0.6440823 * scaleX, 0.100000188, 0.0))
     else
-        coords = Vector.add(coords, Vector.new(-2 * scaleX, 0.100000188, 0.0))
+        coords = Vector.add(coords, Vector.new(2 * scaleX, 0.100000188, 0.0))
     end
 
     for _, v in pairs(guids) do
         print(v)
         local obj = --[[---@type tts__Object]] getObjectFromGUID(v)
         if not (obj == nil) then
-            obj.setPositionSmooth(coords, false, true)
+            if teleport then
+                obj.setPosition(coords)
+            else
+                obj.setPositionSmooth(coords, false, true)
+            end
         else
             print("obj is nil")
             print(v)
@@ -214,40 +194,104 @@ end
 
 
 -- Placeholder click handler functions
-function onclick_draw()
+function onclick_draw(_, player_click_color, _)
     print("onclick_draw")
+    local playerCards = {}
+    for _, item in ipairs(Player[player_click_color].getHandObjects()) do
+        if item.type == "Card" then
+            item.setRotation(Vector.new(0, 180, 180))
+            playerCards[item.guid] = item.guid
+        end
+    end
+    if next(playerCards) then
+        moveGuidsToLocation("discard", playerCards, true)
+    end
 end
 
-function onclick_refill()
+-- refill draw pile with cards from discard pile
+function onclick_refill(_, player_click_color, _)
     print("onclick_refill")
+    local discarded = toSet(scanZones(true).discard)
+    for _, v in pairs(discarded) do
+        getObjectFromGUID(v).setRotation(Vector.new(0, 180, 180))
+    end
+    moveGuidsToLocation("draw", discarded, false)
 end
 
-function onclick_discard()
+---@param _ tts__Object object the button attached to
+---@param player_click_color string
+---@param _ boolean true if not left click
+function onclick_discard(_, player_click_color, _)
     print("onclick_discard")
-    moveGuidsToLocation("burn", cardRegistry)
-
+    local playerCards = {}
+    for _, item in ipairs(Player[player_click_color].getHandObjects()) do
+        if item.type == "Card" then
+            item.setRotation(Vector.new(0, 180, 0))
+            playerCards[item.guid] = item.guid
+        end
+    end
+    if next(playerCards) then
+        moveGuidsToLocation("discard", playerCards, true)
+    end
 end
 
-function onclick_vacuum()
+function onclick_vacuum(_, player_click_color, _)
     print("onclick_vacuum")
-    moveGuidsToLocation("discard", cardRegistry)
+    moveGuidsToLocation("discard", cardRegistry, true)
 end
 
-function onclick_reset()
+---@param guidMask table<string,string>
+function getDecksForHiddenObjects(guidMask)
+    --for _, v in pairs(guidMask) do print(v) end
+    ---@type table<string,string>
+    local result = {}
+    for _, obj in ipairs(getAllObjects()) do
+        local objGUID = obj.getGUID()
+        if obj.tag == "Deck" then
+            print("found deck")
+            local cards = obj.getObjects()
+            if cards ~= nil then
+                for _, card in ipairs(cards) do
+                    print(card.guid)
+                    if card.guid ~= nil and guidMask[card.guid] then
+                        result[objGUID] = objGUID
+                        break
+                    end
+                end
+            end
+        elseif (obj.tag == "Card") then
+            print("found card")
+            if (guidMask[objGUID]) then
+                result[objGUID] = objGUID
+            end
+        end
+    end
+
+    print("found ids")
+    for _, v in pairs(result) do
+        print(v)
+    end
+
+    return result
+end
+
+function onclick_reset(_, player_click_color, _)
     print("onclick_reset")
-
-    moveGuidsToLocation("draw", cardRegistry)
+    -- find out deck ids in case when cards got combined into decks
+    local reachableIds = getDecksForHiddenObjects(cardRegistry)
+    for _,id in pairs(reachableIds) do getObjectFromGUID(id).setRotation(Vector.new(0,180,180)) end
+    moveGuidsToLocation("draw", reachableIds, true)
 end
 
-function onclick_unbind()
+function onclick_unbind(_, player_click_color, _)
     print("onclick_unbind")
-    local setZone = scanZones().set
+    local setZone = scanZones(false).set
     applySubtract(cardRegistry, setZone)
 end
 
-function onclick_bind()
+function onclick_bind(_, player_click_color, _)
     print("onclick_bind")
-    local setZone = scanZones().set
+    local setZone = scanZones(false).set
     for _, v in pairs(setZone) do
         print(v)
     end

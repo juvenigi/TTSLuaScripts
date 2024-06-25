@@ -6,7 +6,7 @@ function onLoad(saved_data)
         valueData = JSON.decode(saved_data)[1]
     end
 
-    -- this is very funky, and it's theoretically better done using modulo arithmetic, but rotation values are purely wack
+    -- this is very funky, but it works
     local rotZ = self.getRotation().z
     if rotZ > 270 then rotZ = rotZ - 360 end
     if (rotZ < 180) then
