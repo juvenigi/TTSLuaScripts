@@ -54,8 +54,8 @@ function drawUI()
         { click_function = "onclick_refill", label = "Refill", tooltip = "Refill draw deck." },
         { click_function = "onclick_discard", label = "Hand", tooltip = "Discard cards." },
         { click_function = "onclick_vacuum", label = "Board", tooltip = "Vacuum cards." },
-        { click_function = "onclick_reset", label = "Reset", tooltip = "Reset deck." },
-        { click_function = "onclick_reset", label = "Reset", tooltip = "Reset deck." },
+        { click_function = "onclick_reset", label = "Reset D", tooltip = "Reset deck." },
+        { click_function = "onclick_reset", label = "Reset D", tooltip = "Reset deck (same button)." },
         { click_function = "onclick_bind", label = "Bind", tooltip = "Register cards to the current deck." },
         { click_function = "onclick_unbind", label = "Unbind", tooltip = "Unbind all cards." },
     }
@@ -219,7 +219,6 @@ function replaceWithDeckIds(guidMask)
     return result
 end
 
-
 -- Placeholder click handler functions
 function onclick_draw(_, player_click_color, _)
     broadcastToColor("onclick_draw not implemented", player_click_color)
@@ -261,17 +260,12 @@ function onclick_vacuum(_, player_click_color, _)
             idsToMove[item.guid] = nil
         end
     end
-    moveGuidsToLocation("discard", idsToMove, true, true)
+    moveGuidsToLocation("discard", idsToMove, true, false)
 end
 
 function onclick_reset(_, player_click_color, _)
     broadcastToColor("onclick_reset", player_click_color)
-    -- find out deck ids in case when cards got combined into decks
-    local reachableIds = replaceWithDeckIds(cardRegistry)
-    for _, id in pairs(reachableIds) do
-        getObjectFromGUID(id).setRotation(Vector.new(0, 180, 180))
-    end
-    moveGuidsToLocation("draw", reachableIds, true)
+    moveGuidsToLocation("draw", replaceWithDeckIds(cardRegistry), true, true)
 end
 
 function onclick_unbind(_, player_click_color, _)
@@ -282,6 +276,19 @@ end
 
 function onclick_bind(_, player_click_color, _)
     broadcastToColor("onclick_bind", player_click_color)
+    -- force guid regeneration (to avoid weird duplicate GUID shenanigans)
+    for _,deck in pairs(scanZones(true).set) do
+        if deck.type == "Deck" then
+            for _, cardRef in ipairs(deck.getObjects()) do
+                deck.takeObject({
+                    index = cardRef.index,
+                    callback_function = function(card)
+                        card.reload()
+                    end
+                })
+            end
+        end
+    end
     local setZone = scanZones(false).set
     applyUnion(cardRegistry, setZone)
 end
