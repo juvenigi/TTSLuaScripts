@@ -129,7 +129,7 @@ function translocate(target)
         if target.type == "Card" then
             target.script_code = cardData
             target.reload()
-            target.setPositionSmooth(savedPos, false, true)
+            target.setPosition(savedPos)
             savedPos = nil
         else
             patchDeck(target)
@@ -141,8 +141,13 @@ end
 ---@param deck tts__Deck
 function patchDeck(deck)
     for _, cardRef in ipairs(deck.getObjects()) do
-        local card = deck.takeObject({index = cardRef.index})
-        card.setPositionSmooth(savedPos, false, true)
-        card.script_code = cardData
+        deck.takeObject({
+            index = cardRef.index,
+            callback_function = function(card)
+                card.script_code = cardData
+                card.reload()
+                card.setPosition(savedPos)
+            end
+        })
     end
 end
