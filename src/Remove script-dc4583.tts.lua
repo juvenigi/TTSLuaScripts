@@ -66,7 +66,7 @@ function click_func(obj, color, alt_click)
     broadcastToColor("Place on top of an object to remove the script", color)
 end
 
-function findHitsInArea(pos, size)
+function scanForObjects(pos, size)
     local hitList = Physics.cast({
         origin = pos,
         direction = { 0, 1, 0 },

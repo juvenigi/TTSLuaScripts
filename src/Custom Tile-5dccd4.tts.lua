@@ -134,14 +134,14 @@ function moveToPile(location, objects, teleport, flip)
     for _, v in ipairs(objects) do
         if not (v == nil) then
             if flip then
-                obj.setRotation(Vector.new(0, 180, 180))
+                v.setRotation(Vector.new(0, 180, 180))
             else
-                obj.setRotation(Vector.new(0, 180, 0))
+                v.setRotation(Vector.new(0, 180, 0))
             end
             if teleport then
-                obj.setPosition(coords)
+                v.setPosition(coords)
             else
-                obj.setPositionSmooth(coords, false, true)
+                v.setPositionSmooth(coords, false, true)
             end
         else
             print("obj is nil")
