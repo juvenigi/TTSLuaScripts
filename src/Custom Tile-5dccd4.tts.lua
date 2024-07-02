@@ -100,6 +100,7 @@ function initButton(params)
     self.createButton(buttonParams)
 end
 
+---@return table<string,tts__Object[]> objects of 4 respective zones (draw, discard, burn, set)
 function scanZones(deckIds)
     local selfVecAbs = self.getPosition()
     -- absolute position of deck areas to scan
@@ -109,7 +110,7 @@ function scanZones(deckIds)
         burn = { 1 + selfVecAbs.x, 0 + selfVecAbs.y, 0 + selfVecAbs.z },
         set = { 4 + selfVecAbs.x, 0 + selfVecAbs.y, 0 + selfVecAbs.z }
     }
-    ---@type table<string,string[]>
+    ---@type table<string,tts__Object[]>
     local result = {
         draw = {},
         discard = {},
@@ -123,21 +124,15 @@ function scanZones(deckIds)
             if obj then
                 if obj.type == "Deck" then
                     if deckIds then
-                        table.insert(result[area], obj.getGUID())
+                        table.insert(result[area], obj)
                     else
-                        local finalDeck = --[[---@type tts__Deck]] obj
-                        local contents = finalDeck.getObjects()
-                        for _, card in ipairs(contents) do
-                            table.insert(result[area], card.guid)
-                        end
                     end
                 elseif obj.type == "Card" then
-                    table.insert(result[area], obj.getGUID())
+                    table.insert(result[area], obj)
                 end
             end -- other object names are ignored
         end
     end
-
     return result
 end
 
@@ -150,16 +145,16 @@ function findHitsInArea(pos, size)
         max_distance = 0,
         debug = true,
     })
-
     return hitList
 end
+
 --- Moves Cards or Decks to one of the predetermined locations
 --- TODO: rotate / flip cards before making them land into the deckzone
 ---@param location "draw" | "discard" | "burn" | "set"
 ---@param guids table<string,string>
 ---@param teleport boolean set position instantaneously?
 ---@param flip boolean flip card?
-function moveGuidsToLocation(location, guids, teleport, flip)
+function moveGuidsToLocation(location, objects, teleport, flip)
     local coords = self.getPosition()
     local scaleX = self.getScale().x
     if location == "draw" then
@@ -172,8 +167,8 @@ function moveGuidsToLocation(location, guids, teleport, flip)
         coords = Vector.add(coords, Vector.new(2 * scaleX, 0.100000188, 0.0))
     end
 
-    for _, v in pairs(guids) do
-        local obj = --[[---@type tts__Object]] getObjectFromGUID(v)
+    for _, v in ipairs(objects) do
+        local obj = --[[---@type tts__Object]] v
         if not (obj == nil) then
             if flip then
                 obj.setRotation(Vector.new(0, 180, 180))
@@ -193,31 +188,35 @@ function moveGuidsToLocation(location, guids, teleport, flip)
     end
 end
 
-
----@param guidMask table<string,string>
-function replaceWithDeckIds(guidMask)
-    ---@type table<string,string>
-    local result = {}
+---@param playerColor string of player
+---@return tts__Object[] array of objects
+function findPlayerCards(playerColor)
+    ---@type tts__Object[]
+    local playerCards = {}
     for _, obj in ipairs(getAllObjects()) do
-        local objGUID = obj.getGUID()
         if obj.tag == "Deck" then
             local cards = obj.getObjects()
+            local addThisDeck = false
             if cards ~= nil then
                 for _, card in ipairs(cards) do
-                    if card.guid ~= nil and guidMask[card.guid] then
-                        result[objGUID] = objGUID
+                    if card.gm_notes == playerColor then
+                        addThisDeck = true
                         break
                     end
                 end
             end
+            if addThisDeck then
+                table.insert(playerCards, obj)
+            end
         elseif (obj.tag == "Card") then
-            if (guidMask[objGUID]) then
-                result[objGUID] = objGUID
+            if obj.getGMNotes() == playerColor then
+                table.insert(playerCards, obj)
             end
         end
     end
-    return result
+    return playerCards
 end
+
 
 -- Placeholder click handler functions
 function onclick_draw(_, player_click_color, _)
@@ -227,7 +226,7 @@ end
 -- refill draw pile with cards from discard pile
 function onclick_refill(_, player_click_color, _)
     broadcastToColor("onclick_refill", player_click_color)
-    moveGuidsToLocation("draw", toSet(scanZones(true).discard), false, true)
+    moveGuidsToLocation("draw", scanZones(true).discard, false, true)
 end
 
 ---@param _ tts__Object object the button attached to
@@ -239,7 +238,7 @@ function onclick_discard(_, player_click_color, _)
     for _, item in ipairs(Player[player_click_color].getHandObjects()) do
         if item.type == "Card" then
             item.setRotation(Vector.new(0, 180, 0))
-            playerCards[item.guid] = item.guid
+            table.insert(playerCards, item)
         end
     end
     if next(playerCards) then
@@ -248,47 +247,53 @@ function onclick_discard(_, player_click_color, _)
 end
 
 function onclick_vacuum(_, player_click_color, _)
-    broadcastToColor("onclick_vacuum", player_click_color)
-    local idsToMove = replaceWithDeckIds(cardRegistry)
-    local matZones = scanZones(true)
-    applySubtract(idsToMove, matZones.draw)
-    applySubtract(idsToMove, matZones.discard)
-    applySubtract(idsToMove, matZones.burn)
-    applySubtract(idsToMove, matZones.set)
-    for _, item in ipairs(Player[player_click_color].getHandObjects()) do
-        if item.type == "Card" then
-            idsToMove[item.guid] = nil
-        end
-    end
-    moveGuidsToLocation("discard", idsToMove, true, false)
+    broadcastToColor("onclick_vacuum not implemented", player_click_color)
 end
 
 function onclick_reset(_, player_click_color, _)
     broadcastToColor("onclick_reset", player_click_color)
-    moveGuidsToLocation("draw", replaceWithDeckIds(cardRegistry), true, true)
+    moveGuidsToLocation("draw", findPlayerCards(player_click_color), true, true)
 end
 
 function onclick_unbind(_, player_click_color, _)
     broadcastToColor("onclick_unbind", player_click_color)
-    cardRegistry = {}
-    updateSave()
-end
-
-function onclick_bind(_, player_click_color, _)
-    broadcastToColor("onclick_bind", player_click_color)
-    -- force guid regeneration (to avoid weird duplicate GUID shenanigans)
-    for _,deck in pairs(scanZones(true).set) do
+    for _, deck in ipairs(scanZones(true).set) do
         if deck.type == "Deck" then
             for _, cardRef in ipairs(deck.getObjects()) do
                 deck.takeObject({
                     index = cardRef.index,
                     callback_function = function(card)
-                        card.reload()
+                        card.setGMNotes("")
                     end
                 })
             end
+        elseif deck.type == "Card" then
+            deck.setGMNotes("")
         end
     end
-    local setZone = scanZones(false).set
-    applyUnion(cardRegistry, setZone)
+end
+
+function onclick_bind(_, player_click_color, _)
+    broadcastToColor("onclick_bind", player_click_color)
+    -- force guid regeneration (to avoid weird duplicate GUID shenanigans)
+    for _, deck in ipairs(scanZones(true).set) do
+        if deck.type == "Deck" then
+            for _, cardRef in ipairs(deck.getObjects()) do
+                Wait.frames(function()
+                    deck.takeObject({
+                        index = cardRef.index,
+                        ---@param card tts__Object
+                        callback_function = function(card)
+                            Wait.frames(function()
+                                card.addForce({0, 30, 0})
+                                card.setGMNotes(player_click_color)
+                            end)
+                        end
+                    })
+                end, 1)
+            end
+        elseif deck.type == "Card" then
+            deck.setGMNotes(player_click_color)
+        end
+    end
 end
