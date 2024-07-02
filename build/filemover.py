@@ -15,11 +15,9 @@ for filename in os.listdir(src_dir):
     if filename.endswith('.tts.lua'):
         # Create the new file name by removing the .lua extension
         new_filename = filename.replace('.tts.lua', '.ttslua')
-
         # Define full file paths
         src_file = os.path.join(src_dir, filename)
         dest_file = os.path.join(dest_dir, new_filename)
-
         # Copy and rename the file to the destination directory
         shutil.copy(src_file, dest_file)
 
