@@ -9,9 +9,6 @@ function onload(saved_data)
         valueData = JSON.decode(saved_data)[1]
 
     end
-
-
-
     self.createInput {
         input_function = "onInput",
         function_owner = self,
@@ -58,7 +55,7 @@ end
 function click_func(obj, color, alt_click)
     local pos = { x = self.getPosition().x, y = self.getPosition().y - 1.2, z = self.getPosition().z }
     local size = { x = 0.5, y = 1, z = 0.5 }
-    for k, v in pairs(findHitsInArea(pos, size)) do
+    for k, v in pairs(scanForObjects(pos, size)) do
         if (v.hit_object ~= self) then
             if (v.hit_object.type ~= "Surface") then
                 local name = v.hit_object.getName()
@@ -88,32 +85,80 @@ end
 
 ---@param target tts__Object
 function translocate(target)
-    if not savedPos then
-        savedPos = self.getPosition()
-        return
-    else
-        if target.type == "Card" then
-            target.script_code = cardData
-            target.reload()
-            target.setPosition(savedPos)
-            savedPos = nil
-        else
-            patchDeck(target)
-        end
-        savedPos = nil
+    if target.type == "Card" then
+        target.script_code = cardData
+        target.reload()
+    elseif target.type == "Deck" then
+        patchDeck(target)
     end
 end
 
 ---@param deck tts__Deck
 function patchDeck(deck)
-    for _, cardRef in ipairs(deck.getObjects()) do
-        deck.takeObject({
-            index = cardRef.index,
-            callback_function = function(card)
-                card.script_code = cardData
-                card.reload()
-                card.setPosition(savedPos)
-            end
-        })
+    local cardCount = #deck.getObjects()
+    if cardCount == 2 then
+        twoCardCallback(deck)
+    else
+        cardCallback(cardCount - 1, deck)
     end
+end
+
+function twoCardCallback(deck)
+    local deckPos = Vector.add(deck.getPosition(), Vector.new(0, 10, 0))
+    local objClone = deck.clone({ position = deckPos })
+    deck.putObject(objClone)
+    cardCallback(3, deck)
+    Wait.frames(function()
+        cardDestroyCallback(1, deck)
+    end, 10)
+end
+
+---@param cardIndex number
+---@param deckObject tts__Object
+function cardCallback(cardIndex, deckObject)
+    local deckPos = deckObject.getPosition()
+    if cardIndex < 0 then
+        return
+    end
+    deckObject.takeObject({
+        index = #deckObject.getObjects() - 1,
+        position = Vector.add(deckPos, Vector.new(0, 10, 0)),
+        smooth = false,
+        callback_function = function(card)
+            Wait.frames(function()
+                card.script_code = cardData
+                local reloaded = card.reload()
+                Wait.frames(function()
+                    deckObject.putObject(reloaded)
+                end)
+                if cardIndex - 1 < 0 then
+                    return
+                end
+                print("calling callback")
+                print(cardIndex-1)
+                cardCallback(cardIndex - 1, deckObject)
+            end)
+        end
+    })
+end
+
+---@param cardIndex number
+---@param deckObject tts__Object
+---@param gmNote string
+function cardDestroyCallback(cardIndex, deckObject)
+    local deckPos = deckObject.getPosition()
+    if cardIndex == -1 then
+        return
+    end
+    deckObject.takeObject({
+        index = #deckObject.getObjects() - 1,
+        position = Vector.add(deckPos, Vector.new(0, 10, 0)),
+        smooth = false,
+        callback_function = function(card)
+            Wait.frames(function()
+                destroyObject(card)
+                cardDestroyCallback(cardIndex - 1, deckObject)
+            end)
+        end
+    })
 end

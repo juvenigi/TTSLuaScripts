@@ -5,26 +5,7 @@ function onLoad(saved_data)
     drawUI()
 end
 
---- Add ids from a guid array to a self-keyed set
----@param guids string[]
----@param set table<string,string>
-function applyUnion(set, guids)
-    for _, guid in ipairs(guids) do
-        set[guid] = guid
-    end
-end
-
---- Subtract ids from a guid array to a self-keyed set
----@param guids string[]
----@param set table<string,string>
-function applySubtract(set, guids)
-    for _, guid in ipairs(guids) do
-        set[guid] = nil
-    end
-end
-
 --- convert a 1-indexed array to a self-keyed set
----@param array string[]
 function toSet(array)
     ---@type table<string,string>
     local res = {}
@@ -105,12 +86,12 @@ function scanZones()
         set = {}
     }
     for area, pos in pairs(areas) do
-        local hitObjects = findHitsInArea(pos, { x = 0.1, y = 1, z = 0.1 })
+        local hitObjects = scanForObjects(pos, { x = 0.1, y = 1, z = 0.1 })
         for _, hit in pairs(hitObjects) do
             local obj = hit.hit_object
             if obj then
                 if obj.type == "Deck" then
-                        table.insert(result[area], obj)
+                    table.insert(result[area], obj)
                 elseif obj.type == "Card" then
                     table.insert(result[area], obj)
                 end
@@ -120,7 +101,7 @@ function scanZones()
     return result
 end
 
-function findHitsInArea(pos, size)
+function scanForObjects(pos, size)
     local hitList = Physics.cast({
         origin = pos,
         direction = { 0, 0, 1 },
@@ -133,11 +114,10 @@ function findHitsInArea(pos, size)
 end
 
 --- Moves Cards or Decks to one of the predetermined locations
---- TODO: rotate / flip cards before making them land into the deckzone
 ---@param location "draw" | "discard" | "burn" | "set"
----@param objects tts__Object[] objects
----@param teleport boolean set position instantaneously?
----@param flip boolean flip card?
+---@param objects tts__Object[] objects to move
+---@param teleport boolean will not smoothly move if true
+---@param flip boolean flip card if true (backside up)
 function moveToPile(location, objects, teleport, flip)
     local coords = self.getPosition()
     local scaleX = self.getScale().x
@@ -152,14 +132,12 @@ function moveToPile(location, objects, teleport, flip)
     end
 
     for _, v in ipairs(objects) do
-        local obj = --[[---@type tts__Object]] v
-        if not (obj == nil) then
+        if not (v == nil) then
             if flip then
                 obj.setRotation(Vector.new(0, 180, 180))
             else
                 obj.setRotation(Vector.new(0, 180, 0))
             end
-
             if teleport then
                 obj.setPosition(coords)
             else
@@ -174,9 +152,10 @@ end
 
 ---@param playerColor string of player
 ---@return tts__Object[] array of objects
-function findPlayerOwnedObjects(playerColor)
+function findPlayerOwnedObjects(playerColor, excludePlayerHand)
     ---@type tts__Object[]
     local playerCards = {}
+    local handSet = toSet(Player[playerColor].getHandObjects())
     for _, obj in ipairs(getAllObjects()) do
         if obj.tag == "Deck" then
             local cards = obj.getObjects()
@@ -194,7 +173,9 @@ function findPlayerOwnedObjects(playerColor)
             end
         elseif (obj.tag == "Card") then
             if obj.getGMNotes() == playerColor then
-                table.insert(playerCards, obj)
+                if (not excludePlayerHand) or (handSet[obj] == nil) then
+                    table.insert(playerCards, obj)
+                end
             end
         end
     end
@@ -204,13 +185,19 @@ end
 
 -- Placeholder click handler functions
 function onclick_draw(_, player_click_color, _)
-    broadcastToColor("onclick_draw not implemented", player_click_color)
+    broadcastToColor("onclick_draw", player_click_color)
+    local drawDeck = --[[---@type tts__Object]] scanZones().draw[1]
+    drawDeck.deal(1, player_click_color)
 end
 
 -- refill draw pile with cards from discard pile
 function onclick_refill(_, player_click_color, _)
     broadcastToColor("onclick_refill", player_click_color)
-    moveToPile("draw", scanZones().discard, false, true)
+    local discardPile = scanZones().discard
+    for _, v in ipairs(discardPile) do
+        v.shuffle()
+    end
+    moveToPile("draw", discardPile, false, true)
 end
 
 ---@param _ tts__Object object the button attached to
@@ -232,30 +219,23 @@ end
 
 function onclick_vacuum(_, player_click_color, _)
     broadcastToColor("onclick_vacuum", player_click_color)
-    local allPlayerCards = findPlayerOwnedObjects(player_click_color)
     local zones = scanZones()
-    local allZoneObjects = toSet(concatTables(zones.draw, zones.discard, zones.burn, zones.set))
+    local allZoneArray = concatTables(zones.draw, zones.discard, zones.burn, zones.set)
+    local allZoneObjects = toSet(allZoneArray)
     local vacuumList = {}
-    for _, obj in ipairs(allPlayerCards) do
+    for _, obj in ipairs(findPlayerOwnedObjects(player_click_color, true)) do
         if allZoneObjects[obj] == nil then
             table.insert(vacuumList, obj)
         end
     end
-
-    print(#allPlayerCards)
-    print(#concatTables(zones.draw, zones.discard, zones.burn, zones.set))
-
     if next(vacuumList) then
-        for i,v in ipairs(vacuumList) do
-            print(i)
-        end
         moveToPile("discard", vacuumList, true, false)
     end
 end
 
 function onclick_reset(_, player_click_color, _)
     broadcastToColor("onclick_reset", player_click_color)
-    moveToPile("draw", findPlayerOwnedObjects(player_click_color), true, true)
+    moveToPile("draw", findPlayerOwnedObjects(player_click_color, false), true, true)
 end
 
 function onclick_unbind(_, player_click_color, _)
@@ -343,7 +323,9 @@ function twoCardCallback(deck, gmNote)
     local objClone = deck.clone({ position = deckPos })
     deck.putObject(objClone)
     cardCallback(3, deck, gmNote)
-    cardDestroyCallback(1, deck)
+    Wait.frames(function()
+        cardDestroyCallback(1, deck)
+    end, 10)
 end
 
 function onclick_bind(_, player_click_color, _)
