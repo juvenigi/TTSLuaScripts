@@ -8,65 +8,24 @@ function onload(saved_data)
     if saved_data then
         valueData = JSON.decode(saved_data)[1]
     end
-
-    -- this is very funky, and it's theoretically better done using modulo arithmetic, but rotation values are purely wack
     local rotZ = self.getRotation().z
-    if rotZ > 270 then rotZ = rotZ - 360 end
-    if (rotZ < 180) then
-        isFlipped = true
-        self.createInput {
-            input_function = "onInput",
-            function_owner = self,
-            label = "Write here",
-            alignment = 3,
-            position = { 0, 0.4, 0 },
-            rotation = { 180, 90, 0 },
-            scale = { -1, -1, 1 },
-            width = 1300,
-            height = 860,
-            value = valueData,
-            font_size = 60,
-        }
-    else
-        isFlipped = false
-        self.createInput {
-            input_function = "onInput",
-            function_owner = self,
-            label = "Write here",
-            alignment = 3,
-            position = { 0, 0.4, 0 },
-            rotation = { 0, 90, 0 },
-            scale = { 1, 1, 1 },
-            width = 1300,
-            height = 860,
-            value = valueData,
-            font_size = 60,
-        }
-    end
+    self.createInput {
+        input_function = "onInput",
+        function_owner = self,
+        label = "Write here",
+        alignment = 3,
+        position = { 0, 0.4, 0 },
+        rotation = { 180, 90, 0 },
+        scale = { -1, -1, 1 },
+        width = 1300,
+        height = 860,
+        value = valueData,
+        font_size = 60,
+    }
 end
 
 function onInput(self, ply, text, selected)
-    if not selected then
-        valueData = text
-        updateSave()
-    end
-end
-
-function onRotate(spin, flip, player_color, old_spin, old_flip)
-    -- track if the card is flipped
-    if flip ~= old_flip then
-        print(player_color .. " flipped " .. tostring(self) .. " from " .. old_flip .. " degrees to " .. flip .. " degrees")
-        setInputReadonly()
-    end
-end
-
-function setInputReadonly()
-    if isFlipped then
-        self.editInput({ index = 0, rotation = { 0, 90, 0 }, scale = { 1, 1, 1 } })
-    else
-        self.editInput({ index = 0, rotation = { 180, 90, 0 }, scale = { -1, -1, 1 } })
-    end
-    isFlipped = not isFlipped
+    self.reload()
 end
 
 function updateSave()
@@ -131,7 +90,8 @@ function translocate(target)
             target.reload()
             target.setPosition(savedPos)
             savedPos = nil
-        else
+        elseif target.type == "Deck" then
+
             patchDeck(target)
         end
         savedPos = nil
@@ -140,14 +100,65 @@ end
 
 ---@param deck tts__Deck
 function patchDeck(deck)
-    for _, cardRef in ipairs(deck.getObjects()) do
-        deck.takeObject({
-            index = cardRef.index,
-            callback_function = function(card)
+    local cardCount = #deck.getObjects()
+    if cardCount == 2 then
+        twoCardCallback(deck)
+    else
+        cardCallback(cardCount-1, deck)
+    end
+end
+
+---@param cardIndex number
+---@param deckObject tts__Object
+---@param gmNote string
+function cardCallback(cardIndex, deckObject)
+    local deckPos = deckObject.getPosition()
+    if cardIndex == -1 then
+        return
+    end
+    deckObject.takeObject({
+        index = #deckObject.getObjects() - 1,
+        position = Vector.add(deckPos, Vector.new(0, 10, 0)),
+        smooth = false,
+        callback_function = function(card)
+            Wait.frames(function()
                 card.script_code = cardData
                 card.reload()
-                card.setPosition(savedPos)
-            end
-        })
+                deckObject.putObject(card)
+                if cardIndex - 1 == -1 then
+                    return
+                end
+                cardCallback(cardIndex - 1, deckObject)
+            end)
+        end
+    })
+end
+
+---@param cardIndex number
+---@param deckObject tts__Object
+---@param gmNote string
+function cardDestroyCallback(cardIndex, deckObject)
+    local deckPos = deckObject.getPosition()
+    if cardIndex == -1 then
+        return
     end
+    deckObject.takeObject({
+        index = #deckObject.getObjects() - 1,
+        position = Vector.add(deckPos, Vector.new(0, 2, 0)),
+        smooth = false,
+        callback_function = function(card)
+            Wait.frames(function()
+                destroyObject(card)
+                cardDestroyCallback(cardIndex - 1, deckObject, gmNote)
+            end)
+        end
+    })
+end
+
+function twoCardCallback(deck, gmNote)
+    local deckPos = Vector.add(deck.getPosition(), Vector.new(0, 10, 0))
+    local objClone = deck.clone({ position = deckPos })
+    deck.putObject(objClone)
+    cardCallback(3, deck)
+    cardDestroyCallback(1, deck)
 end

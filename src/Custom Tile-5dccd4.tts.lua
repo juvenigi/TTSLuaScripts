@@ -2,18 +2,7 @@
 -- contains zones for main deck, graveyard, burned cards, and initialization zones for binding/unbinding cards
 -- attached snap points (positions): Vec{x, 0.1, 0} where x in {-2,-0,6,0,6,2} (*2 obj scale)
 function onLoad(saved_data)
-    if saved_data then
-        ---@type table<string,string>
-        cardRegistry = JSON.decode(saved_data)[1]
-    end
-    if cardRegistry == nil then
-        cardRegistry = {}
-    end
     drawUI()
-end
-
-function updateSave()
-    self.script_state = JSON.encode({ cardRegistry })
 end
 
 --- Add ids from a guid array to a self-keyed set
@@ -23,7 +12,6 @@ function applyUnion(set, guids)
     for _, guid in ipairs(guids) do
         set[guid] = guid
     end
-    updateSave()
 end
 
 --- Subtract ids from a guid array to a self-keyed set
@@ -33,7 +21,6 @@ function applySubtract(set, guids)
     for _, guid in ipairs(guids) do
         set[guid] = nil
     end
-    updateSave()
 end
 
 --- convert a 1-indexed array to a self-keyed set
@@ -74,7 +61,7 @@ function drawUI()
             basePosition[3]
         }
 
-        initButton({
+        setupButtonParams({
             click_function = button.click_function,
             label = button.label,
             tooltip = button.tooltip,
@@ -83,7 +70,7 @@ function drawUI()
     end
 end
 
-function initButton(params)
+function setupButtonParams(params)
     local buttonParams = {
         click_function = params.click_function,
         function_owner = self,
@@ -101,7 +88,7 @@ function initButton(params)
 end
 
 ---@return table<string,tts__Object[]> objects of 4 respective zones (draw, discard, burn, set)
-function scanZones(deckIds)
+function scanZones()
     local selfVecAbs = self.getPosition()
     -- absolute position of deck areas to scan
     local areas = {
@@ -123,10 +110,7 @@ function scanZones(deckIds)
             local obj = hit.hit_object
             if obj then
                 if obj.type == "Deck" then
-                    if deckIds then
                         table.insert(result[area], obj)
-                    else
-                    end
                 elseif obj.type == "Card" then
                     table.insert(result[area], obj)
                 end
@@ -151,10 +135,10 @@ end
 --- Moves Cards or Decks to one of the predetermined locations
 --- TODO: rotate / flip cards before making them land into the deckzone
 ---@param location "draw" | "discard" | "burn" | "set"
----@param guids table<string,string>
+---@param objects tts__Object[] objects
 ---@param teleport boolean set position instantaneously?
 ---@param flip boolean flip card?
-function moveGuidsToLocation(location, objects, teleport, flip)
+function moveToPile(location, objects, teleport, flip)
     local coords = self.getPosition()
     local scaleX = self.getScale().x
     if location == "draw" then
@@ -190,7 +174,7 @@ end
 
 ---@param playerColor string of player
 ---@return tts__Object[] array of objects
-function findPlayerCards(playerColor)
+function findPlayerOwnedObjects(playerColor)
     ---@type tts__Object[]
     local playerCards = {}
     for _, obj in ipairs(getAllObjects()) do
@@ -226,7 +210,7 @@ end
 -- refill draw pile with cards from discard pile
 function onclick_refill(_, player_click_color, _)
     broadcastToColor("onclick_refill", player_click_color)
-    moveGuidsToLocation("draw", scanZones(true).discard, false, true)
+    moveToPile("draw", scanZones().discard, false, true)
 end
 
 ---@param _ tts__Object object the button attached to
@@ -242,30 +226,47 @@ function onclick_discard(_, player_click_color, _)
         end
     end
     if next(playerCards) then
-        moveGuidsToLocation("discard", playerCards, true, false)
+        moveToPile("discard", playerCards, true, false)
     end
 end
 
 function onclick_vacuum(_, player_click_color, _)
-    broadcastToColor("onclick_vacuum not implemented", player_click_color)
+    broadcastToColor("onclick_vacuum", player_click_color)
+    local allPlayerCards = findPlayerOwnedObjects(player_click_color)
+    local zones = scanZones()
+    local allZoneObjects = toSet(concatTables(zones.draw, zones.discard, zones.burn, zones.set))
+    local vacuumList = {}
+    for _, obj in ipairs(allPlayerCards) do
+        if allZoneObjects[obj] == nil then
+            table.insert(vacuumList, obj)
+        end
+    end
+
+    print(#allPlayerCards)
+    print(#concatTables(zones.draw, zones.discard, zones.burn, zones.set))
+
+    if next(vacuumList) then
+        for i,v in ipairs(vacuumList) do
+            print(i)
+        end
+        moveToPile("discard", vacuumList, true, false)
+    end
 end
 
 function onclick_reset(_, player_click_color, _)
     broadcastToColor("onclick_reset", player_click_color)
-    moveGuidsToLocation("draw", findPlayerCards(player_click_color), true, true)
+    moveToPile("draw", findPlayerOwnedObjects(player_click_color), true, true)
 end
 
 function onclick_unbind(_, player_click_color, _)
     broadcastToColor("onclick_unbind", player_click_color)
-    for _, deck in ipairs(scanZones(true).set) do
+
+    for _, deck in ipairs(scanZones().set) do
         if deck.type == "Deck" then
-            for _, cardRef in ipairs(deck.getObjects()) do
-                deck.takeObject({
-                    index = cardRef.index,
-                    callback_function = function(card)
-                        card.setGMNotes("")
-                    end
-                })
+            if #deck.getObjects() == 2 then
+                twoCardCallback(deck, "")
+            else
+                cardCallback(#deck.getObjects() - 1, deck, "")
             end
         elseif deck.type == "Card" then
             deck.setGMNotes("")
@@ -273,24 +274,86 @@ function onclick_unbind(_, player_click_color, _)
     end
 end
 
+function concatTables(t1, t2, t3, t4)
+    local result = {}
+    for i = 1, #t1 do
+        result[#result + 1] = t1[i]
+    end
+    for i = 1, #t2 do
+        result[#result + 1] = t2[i]
+    end
+    for i = 1, #t3 do
+        result[#result + 1] = t3[i]
+    end
+    for i = 1, #t4 do
+        result[#result + 1] = t4[i]
+    end
+
+    return result
+end
+
+---@param cardIndex number
+---@param deckObject tts__Object
+---@param gmNote string
+function cardCallback(cardIndex, deckObject, gmNote)
+    local deckPos = deckObject.getPosition()
+    if cardIndex == -1 then
+        return
+    end
+    deckObject.takeObject({
+        index = #deckObject.getObjects() - 1,
+        position = Vector.add(deckPos, Vector.new(0, 2, 0)),
+        smooth = false,
+        callback_function = function(card)
+            Wait.frames(function()
+                card.setGMNotes(gmNote)
+                deckObject.putObject(card)
+                if cardIndex - 1 == -1 then
+                    return
+                end
+                cardCallback(cardIndex - 1, deckObject, gmNote)
+            end)
+        end
+    })
+end
+
+---@param cardIndex number
+---@param deckObject tts__Object
+---@param gmNote string
+function cardDestroyCallback(cardIndex, deckObject)
+    local deckPos = deckObject.getPosition()
+    if cardIndex == -1 then
+        return
+    end
+    deckObject.takeObject({
+        index = #deckObject.getObjects() - 1,
+        position = Vector.add(deckPos, Vector.new(0, 2, 0)),
+        smooth = false,
+        callback_function = function(card)
+            Wait.frames(function()
+                destroyObject(card)
+                cardDestroyCallback(cardIndex - 1, deckObject, gmNote)
+            end)
+        end
+    })
+end
+
+function twoCardCallback(deck, gmNote)
+    local deckPos = Vector.add(deck.getPosition(), Vector.new(0, 2, 0))
+    local objClone = deck.clone({ position = deckPos })
+    deck.putObject(objClone)
+    cardCallback(3, deck, gmNote)
+    cardDestroyCallback(1, deck)
+end
+
 function onclick_bind(_, player_click_color, _)
     broadcastToColor("onclick_bind", player_click_color)
-    -- force guid regeneration (to avoid weird duplicate GUID shenanigans)
-    for _, deck in ipairs(scanZones(true).set) do
+    for _, deck in ipairs(scanZones().set) do
         if deck.type == "Deck" then
-            for _, cardRef in ipairs(deck.getObjects()) do
-                Wait.frames(function()
-                    deck.takeObject({
-                        index = cardRef.index,
-                        ---@param card tts__Object
-                        callback_function = function(card)
-                            Wait.frames(function()
-                                card.addForce({0, 30, 0})
-                                card.setGMNotes(player_click_color)
-                            end)
-                        end
-                    })
-                end, 1)
+            if #deck.getObjects() == 2 then
+                twoCardCallback(deck, player_click_color)
+            else
+                cardCallback(#deck.getObjects() - 1, deck, player_click_color)
             end
         elseif deck.type == "Card" then
             deck.setGMNotes(player_click_color)
